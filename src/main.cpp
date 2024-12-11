@@ -6,7 +6,11 @@
 #include <SPI.h>
 #include <SPIFFS.h>
 #include <HTTPClient.h>
+#include <FS.h>
 #include <SD.h>
+#include <SD_MMC.h>
+#include <FFat.h>
+#include "config.h"
 
 // INMP441 Microphone Setup
 #define I2S_WS 22
@@ -21,7 +25,7 @@
 #define I2S_CHANNEL_NUM (1)
 #define FLASH_RECORD_SIZE (I2S_CHANNEL_NUM * SAMPLE_RATE * I2S_SAMPLE_BITS / 8 * RECORD_TIME)
 int playRadio = 0;
-File file;
+fs::File file;
 const char audioRecordfile[] = "/recording.wav";
 const char audioResponsefile[] = "/voicedby.wav";
 const int headerSize = 44;
@@ -41,6 +45,9 @@ const int headerSize = 44;
 std::string ssid = "user";
 std::string pass = "password";
 
+// AWS Server Address *** TODO ***
+const char *serverBroadcastUrl = "TODO";
+
 // TTGO Button Pins
 #define RIGHT_BUTTON 35
 int rightState;            // the current reading from the input pin
@@ -58,6 +65,7 @@ void INMP441_install();
 void record();
 void record_data(uint8_t *d_buf, uint8_t *s_buf, uint32_t len);
 void wavHeader(byte *header, int wavSize);
+void broadcastAudio();
 
 void SPIFFSInit()
 {
@@ -94,7 +102,6 @@ void SPIFFSInit()
 void listSPIFFS(void)
 {
   // DEBUG
-  printSpaceInfo();
   Serial.println(F("\r\nListing SPIFFS files:"));
   static const char line[] PROGMEM = "=================================================";
 
@@ -148,7 +155,7 @@ void listSPIFFS(void)
 
   Serial.println(FPSTR(line));
   Serial.println();
-  TickDelay(1000);
+  delay(1000);
 }
 
 void MAX98357A_install()
@@ -246,6 +253,46 @@ void record() {
   read_buf = NULL;
   free(write_buf);
   write_buf = NULL;
+}
+
+void broadcastAudio()
+{
+  // Initialisation first
+  MAX98357A_install();
+
+  HTTPClient http;
+  http.begin(serverBroadcastUrl);
+
+  int httpCode = http.GET();
+  if (httpCode == HTTP_CODE_OK)
+  {
+    WiFiClient *stream = http.getStreamPtr();
+    uint8_t buffer[MAX_I2S_READ_LEN];
+
+    Serial.println("Starting broadcastAudio ");
+    while (stream->connected() && stream->available())
+    {
+      int len = stream->read(buffer, sizeof(buffer));
+      if (len > 0)
+      {
+        size_t bytes_written;
+        i2s_write((i2s_port_t)MAX_I2S_NUM, buffer, len, &bytes_written, portMAX_DELAY);
+      }
+    }
+    Serial.println("Audio playback completed");
+  }
+  else
+  {
+    Serial.printf("HTTP GET failed, error: %s\n", http.errorToString(httpCode).c_str());
+  }
+
+  http.end();
+
+  i2s_driver_uninstall(MAX_I2S_NUM);
+
+  // Going to sleep
+  Serial.println("Going to sleep after broadcsting");
+  esp_deep_sleep_start();
 }
 
 void wavHeader(byte *header, int wavSize)
