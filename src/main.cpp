@@ -47,6 +47,7 @@ std::string pass = "password";
 
 // AWS Server Address *** TODO ***
 const char *serverBroadcastUrl = "TODO";
+const char *serverUploadUrl = "TODO";
 
 // TTGO Button Pins
 #define RIGHT_BUTTON 35
@@ -65,6 +66,7 @@ void INMP441_install();
 void record();
 void record_data(uint8_t *d_buf, uint8_t *s_buf, uint32_t len);
 void wavHeader(byte *header, int wavSize);
+void uploadFile();
 void broadcastAudio();
 
 void SPIFFSInit()
@@ -193,12 +195,10 @@ void INMP441_install() {
     .bits_per_sample = i2s_bits_per_sample_t(I2S_SAMPLE_BITS),
     .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT, // I2S_CHANNEL_FMT_RIGHT_LEFT,
     .communication_format = (i2s_comm_format_t)(I2S_COMM_FORMAT_STAND_I2S), // i2s_comm_format_t(I2S_COMM_FORMAT_I2S | I2S_COMM_FORMAT_I2S_MSB),
-    .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-    .dma_buf_count = 64,
-    .dma_buf_len = 1024,
-    .use_apll = false,
-    .tx_desc_auto_clear = false,
-    .fixed_mclk = 0
+    .intr_alloc_flags = 0,
+    .dma_buf_count = 16,
+    .dma_buf_len = 60,
+    .use_apll = 1,
   };
  
   i2s_driver_install(I2S_PORT, &i2s_config, 0, NULL);
@@ -253,6 +253,46 @@ void record() {
   read_buf = NULL;
   free(write_buf);
   write_buf = NULL;
+
+  listSPIFFS();
+
+  uploadFile();
+}
+
+void uploadFile()
+{
+  file = SPIFFS.open(audioRecordfile, FILE_READ);
+  if (!file)
+  {
+    Serial.println("FILE IS NOT AVAILABLE!");
+    return;
+  }
+
+  Serial.println("===> Upload FILE to Server");
+
+  HTTPClient client;
+  client.begin(serverUploadUrl);
+  client.addHeader("Content-Type", "audio/wav");
+  int httpResponseCode = client.sendRequest("POST", &file, file.size());
+  Serial.print("httpResponseCode : ");
+  Serial.println(httpResponseCode);
+
+  if (httpResponseCode == 200)
+  {
+    String response = client.getString();
+    Serial.println("==================== Transcription ====================");
+    Serial.println(response);
+    Serial.println("====================      End      ====================");
+  }
+  else
+  {
+    Serial.println("Server is not available... Deep sleep.");
+    esp_deep_sleep_start();
+  }
+  file.close();
+  client.end();
+
+  i2s_driver_uninstall(I2S_NUM_0);
 }
 
 void broadcastAudio()
@@ -344,20 +384,7 @@ void wavHeader(byte *header, int wavSize)
   header[43] = (byte)((wavSize >> 24) & 0xFF);
 }
 
-void setup() {
-  Serial.begin(9600);
-  Serial.println(" ");
-  delay(1000);
-
-  // Set TTGO buttons
-  pinMode(RIGHT_BUTTON, INPUT_PULLUP);
-
-  // Setup MAX98367 Amplifier
-  MAX98357A_install();
-
-  // Setup INMP441 Microphone
-  INMP441_install();
-
+void setupWifi() {
   // Setup Wifi
   WiFi.disconnect();
   WiFi.mode(WIFI_STA);
@@ -375,43 +402,67 @@ void setup() {
   Serial.println(WiFi.localIP());
   Serial.println("");
   // audio.connecttospeech("The WiFi device is connected.", "zh-CN");
+}
+
+void setup() {
+  Serial.begin(9600);
+  Serial.println(" ");
+  delay(1000);
+
+  // Set TTGO buttons
+  pinMode(RIGHT_BUTTON, INPUT_PULLUP);
+
+  // Setup MAX98367 Amplifier
+  Serial.println("Setting up amp");
+  MAX98357A_install();
 
   // Setup Display
   tft.init();
   tft.setRotation(1);
+
+  Serial.println("Setting up SPIFFS");
+  SPIFFSInit();
+  Serial.println("Setting up INMP441 Microphone");
+  INMP441_install();
+  Serial.println("Setting up Wifi");
+  setupWifi();
+  Serial.println("Starting recording");
+  record();
+  delay(500);
+  Serial.println("Starting broadcasting");
+  broadcastAudio();
 }
 
 void loop() {
-  // audio.loop();
-  tft.fillScreen(TFT_WHITE);
-  tft.setTextColor(TFT_BLACK, TFT_WHITE);
-  tft.setCursor(90, 25, 2);
-  tft.println("Gago Translate!");
+  // tft.fillScreen(TFT_WHITE);
+  // tft.setTextColor(TFT_BLACK, TFT_WHITE);
+  // tft.setCursor(90, 25, 2);
+  // tft.println("Gago Translate!");
 
-  if (millis() >= 10000 && playRadio) {
-    playRadio = 0;
-    Serial.println("Playing radio...");
-    // audio.connecttohost("https://stationplaylist.com:7104/listen.aac");
-    // audio.connecttohost("https://ice64.securenetsystems.net/LFTM");
-    // audio.connecttohost("https://lhttp.qtfm.cn/live/1926/64k.mp3");
-  }
+  // if (millis() >= 10000 && playRadio) {
+  //   playRadio = 0;
+  //   Serial.println("Playing radio...");
+  //   // audio.connecttohost("https://stationplaylist.com:7104/listen.aac");
+  //   // audio.connecttohost("https://ice64.securenetsystems.net/LFTM");
+  //   // audio.connecttohost("https://lhttp.qtfm.cn/live/1926/64k.mp3");
+  // }
 
-  int right = digitalRead(RIGHT_BUTTON);
+  // int right = digitalRead(RIGHT_BUTTON);
 
-  if (right != lastRightState) {
-    lastRightDebounceTime = millis();
-  }
+  // if (right != lastRightState) {
+  //   lastRightDebounceTime = millis();
+  // }
 
-  if ((millis() - lastRightDebounceTime) > debounceDelay) {
-    if (right != rightState) {
-      rightState = right;
+  // if ((millis() - lastRightDebounceTime) > debounceDelay) {
+  //   if (right != rightState) {
+  //     rightState = right;
 
-      if (rightState == HIGH) {
-        Serial.println("Right pressed");
-        // Serial.printf("Volume: %d\n", VOLUME);
-        // tft.printf("Volume: %d", VOLUME);
-      }
-    }
-  }
-  lastRightState = right;
+  //     if (rightState == HIGH) {
+  //       Serial.println("Right pressed");
+  //       // Serial.printf("Volume: %d\n", VOLUME);
+  //       // tft.printf("Volume: %d", VOLUME);
+  //     }
+  //   }
+  // }
+  // lastRightState = right;
 }
