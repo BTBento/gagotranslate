@@ -267,8 +267,13 @@ void uploadFile()
   Serial.println("===> Upload FILE to Server");
 
   HTTPClient client;
-  client.begin(serverUploadUrl);
+
+  // TODO: make sure users could select their languages 
+  String serverUrl = "http://" + String(serverUploadUrl) + ":5001/upload?source=en-US&target=es-ES";
+  client.begin(serverUrl);
+
   client.addHeader("Content-Type", "audio/wav");
+
   int httpResponseCode = client.sendRequest("POST", &file, file.size());
   Serial.print("httpResponseCode : ");
   Serial.println(httpResponseCode);
@@ -282,9 +287,11 @@ void uploadFile()
   }
   else
   {
+    Serial.println("Upload failed with code: " + String(httpResponseCode));
     Serial.println("Server is not available... Deep sleep.");
     esp_deep_sleep_start();
   }
+  
   file.close();
   client.end();
 
