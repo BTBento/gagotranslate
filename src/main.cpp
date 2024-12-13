@@ -1,12 +1,9 @@
 #include <Arduino.h>
 #include <WiFi.h>
-#include <esp_wifi.h>
 #include <driver/i2s.h>
-#include <TFT_eSPI.h>
-#include <SPI.h>
+// #include <TFT_eSPI.h>
 #include <SPIFFS.h>
-#include <HTTPClient.h>
-#include "config.h"
+#include <HttpClient.h>
 
 // INMP441 Microphone Setup
 #define I2S_WS 22
@@ -43,7 +40,9 @@ std::string pass = "aeroplusandy1";
 
 // AWS Server Address *** TODO ***
 const char *serverBroadcastUrl = "TODO";
-const char *serverUploadUrl = "54.193.42.133";
+const char *serverUploadAddr = "54.193.42.133";
+const char *serverUploadUrl = "http://54.193.42.133/upload";
+int serverPort = 5000;
 
 // TTGO Button Pins
 #define RIGHT_BUTTON 35
@@ -53,7 +52,7 @@ unsigned long lastRightDebounceTime = 0;
 unsigned long debounceDelay = 50;
 
 // TFT Display
-TFT_eSPI tft = TFT_eSPI();
+// TFT_eSPI tft = TFT_eSPI();
 
 void SPIFFS_init();
 void listSPIFFS();
@@ -255,8 +254,7 @@ void record() {
   uploadFile();
 }
 
-void uploadFile()
-{
+void uploadFile() {
   file = SPIFFS.open(audioRecordfile, FILE_READ);
   if (!file)
   {
@@ -266,65 +264,75 @@ void uploadFile()
 
   Serial.println("===> Upload FILE to Server");
 
-  HTTPClient client;
-  client.begin(serverUploadUrl);
-  client.addHeader("Content-Type", "audio/wav");
-  int httpResponseCode = client.sendRequest("POST", &file, file.size());
-  Serial.print("httpResponseCode : ");
-  Serial.println(httpResponseCode);
+  WiFiClient c;
+  if (c.connect(serverUploadAddr, serverPort)) {
+    Serial.println("Connection established!");
+    String head = "--Gago\r\nContent-Disposition: form-data; name=\"recordingFile\"; filename=\"recording.wav\"\r\nContent-Type: audio/wav\r\n\r\n";
+    String tail = "\r\n--Gago--\r\n";
 
-  if (httpResponseCode == 200)
-  {
-    String response = client.getString();
-    Serial.println("==================== Transcription ====================");
-    Serial.println(response);
-    Serial.println("====================      End      ====================");
+    uint8_t contentLen = head.length() + file.size() + tail.length();
+    c.println("POST /upload HTTP/1.1");
+    c.println("Host: " + String(serverUploadAddr));
+    c.println("Content-Length: " + String(contentLen));
+    c.println("Content-Type: multipart/form-data; boundary=Gago");
+    c.println();
+    c.print(head);
+
+    uint8_t buf[MAX_I2S_READ_LEN];
+    size_t bytes_read;
+
+    Serial.println("Uploading file...");
+    while (file.available()) {
+      bytes_read = file.read(buf, sizeof(buf));
+      c.write(buf, bytes_read);
+    }
+
+    c.print(tail);
+
+    Serial.println("Upload complete!");
   }
-  else
-  {
-    Serial.println("Server is not available... Deep sleep.");
-    esp_deep_sleep_start();
+  else {
+    Serial.printf("Failed trying to reach host: %s at port: %s\n", serverUploadUrl, serverPort);
   }
   file.close();
-  client.end();
-
+  c.stop();
   i2s_driver_uninstall(I2S_NUM_0);
 }
 
 void broadcastAudio()
 {
-  // Initialisation first
-  MAX98357A_install();
+  // // Initialisation first
+  // MAX98357A_install();
 
-  HTTPClient http;
-  http.begin(serverBroadcastUrl);
+  // HTTPClient http;
+  // http.begin(serverBroadcastUrl);
 
-  int httpCode = http.GET();
-  if (httpCode == HTTP_CODE_OK)
-  {
-    WiFiClient *stream = http.getStreamPtr();
-    uint8_t buffer[MAX_I2S_READ_LEN];
+  // int httpCode = http.GET();
+  // if (httpCode == HTTP_CODE_OK)
+  // {
+  //   WiFiClient *stream = http.getStreamPtr();
+  //   uint8_t buffer[MAX_I2S_READ_LEN];
 
-    Serial.println("Starting broadcastAudio");
-    while (stream->connected() && stream->available())
-    {
-      int len = stream->read(buffer, sizeof(buffer));
-      if (len > 0)
-      {
-        size_t bytes_written;
-        i2s_write((i2s_port_t)MAX_I2S_NUM, buffer, len, &bytes_written, portMAX_DELAY);
-      }
-    }
-    Serial.println("Audio playback completed");
-  }
-  else
-  {
-    Serial.printf("HTTP GET failed, error: %s\n", http.errorToString(httpCode).c_str());
-  }
+  //   Serial.println("Starting broadcastAudio");
+  //   while (stream->connected() && stream->available())
+  //   {
+  //     int len = stream->read(buffer, sizeof(buffer));
+  //     if (len > 0)
+  //     {
+  //       size_t bytes_written;
+  //       i2s_write((i2s_port_t)MAX_I2S_NUM, buffer, len, &bytes_written, portMAX_DELAY);
+  //     }
+  //   }
+  //   Serial.println("Audio playback completed");
+  // }
+  // else
+  // {
+  //   Serial.printf("HTTP GET failed, error: %s\n", http.errorToString(httpCode).c_str());
+  // }
 
-  http.end();
+  // http.end();
 
-  i2s_driver_uninstall(MAX_I2S_NUM);
+  // i2s_driver_uninstall(MAX_I2S_NUM);
 
   // Going to sleep
   Serial.println("Going to sleep after broadcsting");
@@ -413,12 +421,12 @@ void setup() {
   MAX98357A_install();
 
   // Setup Display
-  tft.init();
-  tft.setRotation(1);
-  tft.fillScreen(TFT_WHITE);
-  tft.setTextColor(TFT_BLACK, TFT_WHITE);
-  tft.setCursor(90, 25, 2);
-  tft.println("Gago Translate!");
+  // tft.init();
+  // tft.setRotation(1);
+  // tft.fillScreen(TFT_WHITE);
+  // tft.setTextColor(TFT_BLACK, TFT_WHITE);
+  // tft.setCursor(90, 25, 2);
+  // tft.println("Gago Translate!");
 
   Serial.println("Setting up SPIFFS");
   SPIFFSInit();
