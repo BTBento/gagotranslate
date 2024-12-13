@@ -6,10 +6,6 @@
 #include <SPI.h>
 #include <SPIFFS.h>
 #include <HTTPClient.h>
-#include <FS.h>
-#include <SD.h>
-#include <SD_MMC.h>
-#include <FFat.h>
 #include "config.h"
 
 // INMP441 Microphone Setup
@@ -42,12 +38,12 @@ const int headerSize = 44;
 
 // Wifi
 // std::string ssid = "UCInet Mobile Access";
-std::string ssid = "user";
-std::string pass = "password";
+std::string ssid = "nerd";
+std::string pass = "aeroplusandy1";
 
 // AWS Server Address *** TODO ***
 const char *serverBroadcastUrl = "TODO";
-const char *serverUploadUrl = "TODO";
+const char *serverUploadUrl = "54.193.42.133";
 
 // TTGO Button Pins
 #define RIGHT_BUTTON 35
@@ -309,7 +305,7 @@ void broadcastAudio()
     WiFiClient *stream = http.getStreamPtr();
     uint8_t buffer[MAX_I2S_READ_LEN];
 
-    Serial.println("Starting broadcastAudio ");
+    Serial.println("Starting broadcastAudio");
     while (stream->connected() && stream->available())
     {
       int len = stream->read(buffer, sizeof(buffer));
@@ -419,6 +415,10 @@ void setup() {
   // Setup Display
   tft.init();
   tft.setRotation(1);
+  tft.fillScreen(TFT_WHITE);
+  tft.setTextColor(TFT_BLACK, TFT_WHITE);
+  tft.setCursor(90, 25, 2);
+  tft.println("Gago Translate!");
 
   Serial.println("Setting up SPIFFS");
   SPIFFSInit();
@@ -434,11 +434,6 @@ void setup() {
 }
 
 void loop() {
-  // tft.fillScreen(TFT_WHITE);
-  // tft.setTextColor(TFT_BLACK, TFT_WHITE);
-  // tft.setCursor(90, 25, 2);
-  // tft.println("Gago Translate!");
-
   // if (millis() >= 10000 && playRadio) {
   //   playRadio = 0;
   //   Serial.println("Playing radio...");
