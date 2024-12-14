@@ -280,9 +280,19 @@ void uploadFile()
 
   if (httpResponseCode == 200)
   {
-    String response = client.getString();
-    Serial.println("==================== Transcription ====================");
-    Serial.println(response);
+    String originalText = client.header("X-Original");
+    String translatedText = client.header("X-Translation");
+
+    // String response = client.getString();
+    Serial.println("==================== Translation ====================");
+    Serial.println("Original: " + originalText);
+    Serial.println("Translated: " + translatedText);
+
+    WiFiClient* stream = client.getStreamPtr();
+        if (stream->available()) {
+            broadcastAudio();  // Play the translated audio
+        }
+        
     Serial.println("====================      End      ====================");
   }
   else
@@ -302,40 +312,24 @@ void broadcastAudio()
 {
   // Initialisation first
   MAX98357A_install();
-
   HTTPClient http;
-  http.begin(serverBroadcastUrl);
 
-  int httpCode = http.GET();
-  if (httpCode == HTTP_CODE_OK)
-  {
-    WiFiClient *stream = http.getStreamPtr();
+    WiFiClient* stream = http.getStreamPtr();
     uint8_t buffer[MAX_I2S_READ_LEN];
 
-    Serial.println("Starting broadcastAudio");
+    Serial.println("Playing audio...");
     while (stream->connected() && stream->available())
     {
-      int len = stream->read(buffer, sizeof(buffer));
-      if (len > 0)
-      {
-        size_t bytes_written;
-        i2s_write((i2s_port_t)MAX_I2S_NUM, buffer, len, &bytes_written, portMAX_DELAY);
-      }
+        int len = stream->read(buffer, sizeof(buffer));
+        if (len > 0)
+        {
+            size_t bytes_written;
+            i2s_write((i2s_port_t)MAX_I2S_NUM, buffer, len, &bytes_written, portMAX_DELAY);
+        }
     }
     Serial.println("Audio playback completed");
-  }
-  else
-  {
-    Serial.printf("HTTP GET failed, error: %s\n", http.errorToString(httpCode).c_str());
-  }
 
-  http.end();
-
-  i2s_driver_uninstall(MAX_I2S_NUM);
-
-  // Going to sleep
-  Serial.println("Going to sleep after broadcsting");
-  esp_deep_sleep_start();
+    i2s_driver_uninstall(MAX_I2S_NUM);
 }
 
 void wavHeader(byte *header, int wavSize)
