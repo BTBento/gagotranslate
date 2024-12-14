@@ -35,8 +35,8 @@ const int headerSize = 44;
 
 // Wifi
 // std::string ssid = "UCInet Mobile Access";
-std::string ssid = "nerd";
-std::string pass = "aeroplusandy1";
+std::string ssid = "user";
+std::string pass = "password";
 
 // AWS Server Address *** TODO ***
 const char *serverBroadcastUrl = "TODO";
