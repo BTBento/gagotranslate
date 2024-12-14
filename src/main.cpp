@@ -4,6 +4,7 @@
 // #include <TFT_eSPI.h>
 #include <SPIFFS.h>
 #include <HttpClient.h>
+#include "Plotter.h"
 
 // INMP441 Microphone Setup
 #define I2S_WS 22
@@ -54,6 +55,10 @@ unsigned long debounceDelay = 50;
 // TFT Display
 // TFT_eSPI tft = TFT_eSPI();
 
+// Plotter
+Plotter p;
+uint32_t x = 0;
+
 void SPIFFS_init();
 void listSPIFFS();
 void MAX98357A_install();
@@ -64,11 +69,12 @@ void wavHeader(byte *header, int wavSize);
 void uploadFile();
 void broadcastAudio();
 
+// Based from https://github.com/Bars125/Qualification-Work-Voice-Assistant
 void SPIFFSInit()
 {
   if (!SPIFFS.begin(true))
   {
-    Serial.println("SPIFFS initialisation failed!");
+    Serial.println("SPIFFS initialization failed!");
     while (1)
       yield();
   }
@@ -96,6 +102,7 @@ void SPIFFSInit()
   listSPIFFS();
 }
 
+// Based from https://github.com/Bars125/Qualification-Work-Voice-Assistant
 void listSPIFFS(void)
 {
   // DEBUG
@@ -210,6 +217,7 @@ void INMP441_install() {
   i2s_set_clk(I2S_PORT, SAMPLE_RATE, I2S_BITS_PER_SAMPLE_32BIT, I2S_CHANNEL_STEREO);
 }
 
+// Based from https://github.com/Bars125/Qualification-Work-Voice-Assistant
 void record_data(uint8_t *d_buf, uint8_t *s_buf, uint32_t len)
 {
   uint32_t j = 0;
@@ -218,10 +226,11 @@ void record_data(uint8_t *d_buf, uint8_t *s_buf, uint32_t len)
   {
     dac_value = ((((uint16_t)(s_buf[i + 1] & 0xf) << 8) | ((s_buf[i + 0]))));
     d_buf[j++] = 0;
-    d_buf[j++] = dac_value * 256 / 2048;
+    d_buf[j++] = x = dac_value * 256 / 2048;
   }
 }
 
+// Based from https://github.com/Bars125/Qualification-Work-Voice-Assistant
 void record() {
   int read_len = I2S_READ_LEN;
   int write_len = 0;
@@ -231,9 +240,7 @@ void record() {
   uint8_t *write_buf = (uint8_t *) calloc(read_len, sizeof(char));
 
   i2s_read(I2S_PORT, (void *)read_buf, read_len, &bytes_read, portMAX_DELAY);
-  // i2s_read(I2S_PORT, (void *)read_buf, read_len, &bytes_read, portMAX_DELAY);
 
-  // digitalWrite(isAudioRecording, HIGH);
   Serial.println("RECORDING!");
   while (write_len < FLASH_RECORD_SIZE) {
     i2s_read(I2S_PORT, (void *)read_buf, read_len, &bytes_read, portMAX_DELAY);
@@ -271,22 +278,21 @@ void uploadFile() {
     String tail = "\r\n--Gago--\r\n";
 
     uint8_t contentLen = head.length() + file.size() + tail.length();
+    uint8_t buf[MAX_I2S_READ_LEN];
+    size_t bytes_read;
+
+    Serial.println("Uploading file...");
     c.println("POST /upload HTTP/1.1");
     c.println("Host: " + String(serverUploadAddr));
     c.println("Content-Length: " + String(contentLen));
     c.println("Content-Type: multipart/form-data; boundary=Gago");
     c.println();
+    
     c.print(head);
-
-    uint8_t buf[MAX_I2S_READ_LEN];
-    size_t bytes_read;
-
-    Serial.println("Uploading file...");
     while (file.available()) {
       bytes_read = file.read(buf, sizeof(buf));
       c.write(buf, bytes_read);
     }
-
     c.print(tail);
 
     Serial.println("Upload complete!");
@@ -303,42 +309,31 @@ void broadcastAudio()
 {
   // // Initialisation first
   // MAX98357A_install();
-
   // HTTPClient http;
-  // http.begin(serverBroadcastUrl);
 
-  // int httpCode = http.GET();
-  // if (httpCode == HTTP_CODE_OK)
-  // {
-  //   WiFiClient *stream = http.getStreamPtr();
+  //   WiFiClient* stream = http.getStreamPtr();
   //   uint8_t buffer[MAX_I2S_READ_LEN];
 
-  //   Serial.println("Starting broadcastAudio");
+  //   Serial.println("Playing audio...");
   //   while (stream->connected() && stream->available())
   //   {
-  //     int len = stream->read(buffer, sizeof(buffer));
-  //     if (len > 0)
-  //     {
-  //       size_t bytes_written;
-  //       i2s_write((i2s_port_t)MAX_I2S_NUM, buffer, len, &bytes_written, portMAX_DELAY);
-  //     }
+  //       int len = stream->read(buffer, sizeof(buffer));
+  //       if (len > 0)
+  //       {
+  //           size_t bytes_written;
+  //           i2s_write((i2s_port_t)MAX_I2S_NUM, buffer, len, &bytes_written, portMAX_DELAY);
+  //       }
   //   }
   //   Serial.println("Audio playback completed");
-  // }
-  // else
-  // {
-  //   Serial.printf("HTTP GET failed, error: %s\n", http.errorToString(httpCode).c_str());
-  // }
 
-  // http.end();
-
-  // i2s_driver_uninstall(MAX_I2S_NUM);
+  //   i2s_driver_uninstall(MAX_I2S_NUM);
 
   // Going to sleep
   Serial.println("Going to sleep after broadcsting");
   esp_deep_sleep_start();
 }
 
+// Based from https://github.com/Bars125/Qualification-Work-Voice-Assistant
 void wavHeader(byte *header, int wavSize)
 {
   header[0] = 'R';
@@ -408,6 +403,21 @@ void setupWifi() {
   // audio.connecttospeech("The WiFi device is connected.", "zh-CN");
 }
 
+int32_t raw_samples[512];
+
+// Based on https://github.com/atomic14/esp32-i2s-mic-test
+void plotData() {
+  size_t bytes_read = 0;
+  i2s_read(I2S_NUM_0, raw_samples, sizeof(int32_t) * 512, &bytes_read, portMAX_DELAY);
+  int samples_read = bytes_read / sizeof(int32_t);
+  // dump the samples out to the serial channel.
+  for (int i = 0; i < samples_read; i++)
+  {
+    x = raw_samples[i];
+    p.Plot();
+  }
+}
+
 void setup() {
   Serial.begin(9600);
   Serial.println(" ");
@@ -428,6 +438,10 @@ void setup() {
   // tft.setCursor(90, 25, 2);
   // tft.println("Gago Translate!");
 
+  // Setup Plotter
+  p.Begin();
+  p.AddTimeGraph( "Audio waveform", 1500, "x", x);
+
   Serial.println("Setting up SPIFFS");
   SPIFFSInit();
   Serial.println("Setting up INMP441 Microphone");
@@ -436,36 +450,11 @@ void setup() {
   setupWifi();
   Serial.println("Starting recording");
   record();
+  Serial.println("Plotting recording");
+  plotData();
   delay(500);
   Serial.println("Starting broadcasting");
   broadcastAudio();
 }
 
-void loop() {
-  // if (millis() >= 10000 && playRadio) {
-  //   playRadio = 0;
-  //   Serial.println("Playing radio...");
-  //   // audio.connecttohost("https://stationplaylist.com:7104/listen.aac");
-  //   // audio.connecttohost("https://ice64.securenetsystems.net/LFTM");
-  //   // audio.connecttohost("https://lhttp.qtfm.cn/live/1926/64k.mp3");
-  // }
-
-  // int right = digitalRead(RIGHT_BUTTON);
-
-  // if (right != lastRightState) {
-  //   lastRightDebounceTime = millis();
-  // }
-
-  // if ((millis() - lastRightDebounceTime) > debounceDelay) {
-  //   if (right != rightState) {
-  //     rightState = right;
-
-  //     if (rightState == HIGH) {
-  //       Serial.println("Right pressed");
-  //       // Serial.printf("Volume: %d\n", VOLUME);
-  //       // tft.printf("Volume: %d", VOLUME);
-  //     }
-  //   }
-  // }
-  // lastRightState = right;
-}
+void loop() {}
